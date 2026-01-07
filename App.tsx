@@ -12,7 +12,13 @@ import {
   Monitor,
   Youtube,
   Type,
-  Eraser
+  Eraser,
+  Smartphone,
+  ArrowUpFromLine,
+  ArrowDownFromLine,
+  AlignLeft,
+  AlignCenter,
+  AlignRight
 } from 'lucide-react';
 import { OutputType, LandingPosition, ProcessingStep } from './types';
 import { generateFinalPoster, analyzeImageStructure } from './services/geminiService';
@@ -35,6 +41,10 @@ const App: React.FC = () => {
   const [outputType, setOutputType] = useState<OutputType>(OutputType.AD_FEED);
   const [landingPos, setLandingPos] = useState<LandingPosition>(LandingPosition.CENTER);
   const [preserveText, setPreserveText] = useState(false);
+  const [customText, setCustomText] = useState('');
+  
+  // Helper for Landing Page Sub-mode
+  const [landingDevice, setLandingDevice] = useState<'desktop' | 'mobile'>('desktop');
 
   // State: Pipeline
   const [isProcessing, setIsProcessing] = useState(false);
@@ -59,6 +69,25 @@ const App: React.FC = () => {
     };
     checkKey();
   }, []);
+
+  // Update OutputType based on device selection when in Landing mode
+  useEffect(() => {
+    if (outputType === OutputType.LANDING_HERO || outputType === OutputType.LANDING_MOBILE) {
+      if (landingDevice === 'desktop') {
+        setOutputType(OutputType.LANDING_HERO);
+        // Reset to valid horizontal pos if needed
+        if (landingPos === LandingPosition.TOP || landingPos === LandingPosition.BOTTOM) {
+            setLandingPos(LandingPosition.CENTER);
+        }
+      } else {
+        setOutputType(OutputType.LANDING_MOBILE);
+        // Reset to valid vertical pos if needed
+        if (landingPos === LandingPosition.LEFT || landingPos === LandingPosition.RIGHT || landingPos === LandingPosition.CENTER) {
+            setLandingPos(LandingPosition.TOP);
+        }
+      }
+    }
+  }, [landingDevice, outputType, landingPos]);
 
   const handleApiKeySelect = async () => {
     const aiStudio = (window as any).aistudio;
@@ -143,7 +172,8 @@ const App: React.FC = () => {
         outputType, 
         landingPos, 
         analysisText || undefined,
-        preserveText
+        preserveText,
+        customText
       );
       
       setGeneratedImage(resultImageUrl);
@@ -190,6 +220,7 @@ const App: React.FC = () => {
   }
 
   const isWideFormat = outputType === OutputType.LANDING_HERO || outputType === OutputType.THUMBNAIL;
+  const isVerticalFormat = outputType === OutputType.AD_STORIES || outputType === OutputType.LANDING_MOBILE;
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-200 overflow-hidden font-sans">
@@ -285,7 +316,7 @@ const App: React.FC = () => {
                 <label className="text-xs text-zinc-500 mb-2 block">Format</label>
                 <div className="grid grid-cols-2 gap-2 mb-2">
                    <button
-                      onClick={() => setOutputType(OutputType.AD_FEED)}
+                      onClick={() => { setOutputType(OutputType.AD_FEED); setLandingDevice('desktop'); }}
                       className={`px-3 py-2 text-[10px] font-medium rounded-lg border flex items-center justify-center gap-1 transition-all ${
                         outputType === OutputType.AD_FEED
                         ? 'bg-zinc-100 text-black border-transparent' 
@@ -295,7 +326,7 @@ const App: React.FC = () => {
                       <Layout className="w-3 h-3" /> Feed 1:1
                     </button>
                     <button
-                      onClick={() => setOutputType(OutputType.AD_STORIES)}
+                      onClick={() => { setOutputType(OutputType.AD_STORIES); setLandingDevice('desktop'); }}
                       className={`px-3 py-2 text-[10px] font-medium rounded-lg border flex items-center justify-center gap-1 transition-all ${
                         outputType === OutputType.AD_STORIES
                         ? 'bg-zinc-100 text-black border-transparent' 
@@ -307,9 +338,9 @@ const App: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => setOutputType(OutputType.LANDING_HERO)}
+                      onClick={() => { setOutputType(OutputType.LANDING_HERO); setLandingDevice('desktop'); }}
                       className={`px-3 py-2 text-[10px] font-medium rounded-lg border flex items-center justify-center gap-1 transition-all ${
-                        outputType === OutputType.LANDING_HERO
+                        outputType === OutputType.LANDING_HERO || outputType === OutputType.LANDING_MOBILE
                         ? 'bg-zinc-100 text-black border-transparent' 
                         : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700'
                       }`}
@@ -317,7 +348,7 @@ const App: React.FC = () => {
                       <Monitor className="w-3 h-3" /> Landing Page
                     </button>
                     <button
-                      onClick={() => setOutputType(OutputType.THUMBNAIL)}
+                      onClick={() => { setOutputType(OutputType.THUMBNAIL); setLandingDevice('desktop'); }}
                       className={`px-3 py-2 text-[10px] font-medium rounded-lg border flex items-center justify-center gap-1 transition-all ${
                         outputType === OutputType.THUMBNAIL
                         ? 'bg-zinc-100 text-black border-transparent' 
@@ -329,12 +360,92 @@ const App: React.FC = () => {
                 </div>
               </div>
 
+              {/* Landing Page Settings (Desktop vs Mobile) */}
+              {(outputType === OutputType.LANDING_HERO || outputType === OutputType.LANDING_MOBILE) && (
+                <div className="bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50 space-y-3">
+                   {/* Device Toggle */}
+                   <div className="flex bg-zinc-800 p-1 rounded-lg">
+                      <button
+                        onClick={() => setLandingDevice('desktop')}
+                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md transition-all ${
+                          landingDevice === 'desktop' ? 'bg-emerald-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        <Monitor className="w-3 h-3" /> Desktop (16:9)
+                      </button>
+                      <button
+                        onClick={() => setLandingDevice('mobile')}
+                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md transition-all ${
+                          landingDevice === 'mobile' ? 'bg-emerald-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        <Smartphone className="w-3 h-3" /> Mobile (9:16)
+                      </button>
+                   </div>
+
+                   {/* Positioning Logic */}
+                   <div>
+                     <label className="text-xs text-indigo-400 mb-2 block font-medium">
+                       {landingDevice === 'desktop' ? 'Horizontal Layout' : 'Vertical Stacking'}
+                     </label>
+                     
+                     {landingDevice === 'desktop' ? (
+                       // Desktop Controls (Left/Center/Right)
+                       <div className="flex bg-zinc-800 p-1 rounded-lg">
+                         {[LandingPosition.LEFT, LandingPosition.CENTER, LandingPosition.RIGHT].map((pos) => (
+                           <button
+                            key={pos}
+                            onClick={() => setLandingPos(pos)}
+                            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md capitalize transition-all ${
+                              landingPos === pos ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                            }`}
+                           >
+                             {pos === LandingPosition.LEFT && <AlignLeft className="w-3 h-3" />}
+                             {pos === LandingPosition.CENTER && <AlignCenter className="w-3 h-3" />}
+                             {pos === LandingPosition.RIGHT && <AlignRight className="w-3 h-3" />}
+                             {pos}
+                           </button>
+                         ))}
+                       </div>
+                     ) : (
+                        // Mobile Controls (Top/Bottom)
+                        <div className="flex bg-zinc-800 p-1 rounded-lg">
+                           <button
+                            onClick={() => setLandingPos(LandingPosition.TOP)}
+                            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md transition-all ${
+                              landingPos === LandingPosition.TOP ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                            }`}
+                           >
+                             <ArrowUpFromLine className="w-3 h-3" /> Image Top
+                           </button>
+                           <button
+                            onClick={() => setLandingPos(LandingPosition.BOTTOM)}
+                            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md transition-all ${
+                              landingPos === LandingPosition.BOTTOM ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                            }`}
+                           >
+                             <ArrowDownFromLine className="w-3 h-3" /> Image Btm
+                           </button>
+                        </div>
+                     )}
+                   </div>
+                   
+                   <p className="text-[10px] text-zinc-500 text-center leading-tight">
+                     {landingDevice === 'desktop' && landingPos === LandingPosition.LEFT && "Clean space on RIGHT for H1."}
+                     {landingDevice === 'desktop' && landingPos === LandingPosition.RIGHT && "Clean space on LEFT for H1."}
+                     {landingDevice === 'desktop' && landingPos === LandingPosition.CENTER && "Clean space on SIDES."}
+                     {landingDevice === 'mobile' && landingPos === LandingPosition.TOP && "Image Top 40% / Clean Btm 60%."}
+                     {landingDevice === 'mobile' && landingPos === LandingPosition.BOTTOM && "Image Btm 40% / Clean Top 60%."}
+                   </p>
+                </div>
+              )}
+
               {/* Text Mode Toggle */}
               <div>
                 <label className="text-xs text-zinc-500 mb-2 block">Text Overlay Mode</label>
-                <div className="flex bg-zinc-800 p-1 rounded-lg">
+                <div className="flex bg-zinc-800 p-1 rounded-lg mb-2">
                   <button
-                    onClick={() => setPreserveText(false)}
+                    onClick={() => { setPreserveText(false); setCustomText(''); }}
                     className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-[10px] font-medium rounded-md transition-all ${
                       !preserveText ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
                     }`}
@@ -347,34 +458,26 @@ const App: React.FC = () => {
                       preserveText ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    <Type className="w-3 h-3" /> Copy Layout
+                    <Type className="w-3 h-3" /> Layout & Text
                   </button>
                 </div>
+                
+                {/* Custom Text Input - Only shows when "Layout & Text" is active */}
+                {preserveText && (
+                  <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                    <input 
+                      type="text"
+                      value={customText}
+                      onChange={(e) => setCustomText(e.target.value)}
+                      placeholder="Optional: Enter custom headline..."
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <p className="text-[10px] text-zinc-500 mt-1 ml-1">
+                      {customText ? 'AI will render this specific text.' : 'AI will mimic reference text.'}
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {outputType === OutputType.LANDING_HERO && (
-                <div className="bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50">
-                   <label className="text-xs text-indigo-400 mb-2 block font-medium">Web Layout - Text Placement</label>
-                   <div className="flex bg-zinc-800 p-1 rounded-lg">
-                     {[LandingPosition.LEFT, LandingPosition.CENTER, LandingPosition.RIGHT].map((pos) => (
-                       <button
-                        key={pos}
-                        onClick={() => setLandingPos(pos)}
-                        className={`flex-1 py-1.5 text-[10px] font-medium rounded-md capitalize transition-all ${
-                          landingPos === pos ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
-                        }`}
-                       >
-                         {pos}
-                       </button>
-                     ))}
-                   </div>
-                   <p className="text-[10px] text-zinc-500 mt-2 text-center leading-tight">
-                     {landingPos === LandingPosition.LEFT && "Generates CLEAN space on RIGHT for Headline."}
-                     {landingPos === LandingPosition.RIGHT && "Generates CLEAN space on LEFT for Headline."}
-                     {landingPos === LandingPosition.CENTER && "Generates CLEAN space on SIDES for secondary elements."}
-                   </p>
-                </div>
-              )}
             </div>
           </section>
 
@@ -428,9 +531,9 @@ const App: React.FC = () => {
           {/* Central Stage */}
           <div className="flex-1 flex flex-col items-center justify-center relative z-10">
             <div className={`relative transition-all duration-500 ${
-              outputType === OutputType.AD_STORIES ? 'aspect-[9/16] h-[90%]' :
+              isVerticalFormat ? 'aspect-[9/16] h-[90%]' :
               outputType === OutputType.AD_FEED ? 'aspect-square h-[80%]' :
-              'aspect-video w-[90%]' // Covers both Hero and Thumbnail
+              'aspect-video w-[90%]' // Covers both Hero Desktop and Thumbnail
             } bg-[#050505] rounded-lg border border-zinc-800 shadow-2xl flex items-center justify-center overflow-hidden group`}>
               
               {!generatedImage ? (
@@ -465,9 +568,16 @@ const App: React.FC = () => {
                 </>
               )}
             </div>
+            
+            {/* Context Labels */}
             {outputType === OutputType.LANDING_HERO && !generatedImage && (
                  <div className="absolute bottom-4 bg-zinc-900/80 px-4 py-2 rounded-full border border-zinc-800 text-xs text-zinc-400">
-                    <span className="text-indigo-400 font-bold">MODE:</span> Web Layout Generator (Copy Space Optimized)
+                    <span className="text-emerald-400 font-bold">DESKTOP:</span> Web Layout Generator (Horizontal Copy Space)
+                 </div>
+            )}
+            {outputType === OutputType.LANDING_MOBILE && !generatedImage && (
+                 <div className="absolute bottom-4 bg-zinc-900/80 px-4 py-2 rounded-full border border-zinc-800 text-xs text-zinc-400">
+                    <span className="text-emerald-400 font-bold">MOBILE:</span> Vertical Layout Generator (Vertical Copy Space)
                  </div>
             )}
           </div>
@@ -492,6 +602,18 @@ const App: React.FC = () => {
                       <li className="text-xs text-zinc-400 flex items-start gap-2">
                         <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
                         16:9 Cinematic Ratio
+                      </li>
+                   )}
+                   {isVerticalFormat && (
+                      <li className="text-xs text-zinc-400 flex items-start gap-2">
+                        <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
+                        9:16 Vertical Ratio
+                      </li>
+                   )}
+                   {customText && (
+                      <li className="text-xs text-zinc-400 flex items-start gap-2">
+                        <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
+                        Custom Text Rendering
                       </li>
                    )}
                 </ul>

@@ -80,7 +80,8 @@ export const generateFinalPoster = async (
   outputType: string,
   landingPosition: string = 'center',
   analysisContext?: string,
-  preserveText: boolean = false
+  preserveText: boolean = false,
+  customText: string = ''
 ): Promise<string> => {
   const ai = getAiClient();
   
@@ -96,87 +97,98 @@ export const generateFinalPoster = async (
   // Logic for specific formats
   if (outputType === 'ad_stories') {
       aspectRatio = "9:16";
-      promptPrefix = "SOCIAL MEDIA STORY FORMAT.";
+      promptPrefix = "FORMAT: SOCIAL MEDIA STORY (9:16). Extend background vertically if needed.";
   } else if (outputType === 'thumbnail') {
       aspectRatio = "16:9";
       promptPrefix = `
-        YOUTUBE THUMBNAIL FORMAT (16:9).
-        - STYLE: High Contrast, Vibrant Saturation, Eye-Catching.
-        - COMPOSITION: Rule of thirds.
-        - BACKGROUND: Must separate clearly from the subject (Rim lighting).
-        - EXPRESSION: Boost the intensity of the expression slightly for click-through rate.
+        FORMAT: YOUTUBE THUMBNAIL (16:9).
+        - COMPOSITION: High Contrast, Subject Pop, Rule of Thirds.
+        - LIGHTING: Emphasize Rim Light for separation.
       `;
   } else if (outputType === 'landing_hero') {
       aspectRatio = "16:9";
-      // Explicit Web Design Instructions
-      promptPrefix = "WEB DESIGN HERO HEADER (1920x1080).";
+      promptPrefix = "FORMAT: CINEMATIC WEB HEADER (16:9).";
       
       if (landingPosition === 'left') {
-          promptPrefix += `
-            \n**CRITICAL WEB LAYOUT RULE: SUBJECT LEFT / COPY RIGHT**
-            1. The User Actor must be positioned in the LEFT 30-40% of the frame.
-            2. The RIGHT 60% of the frame is the "COPY SPACE" (Negative Space).
-            3. INSTRUCTION FOR RIGHT SIDE: Extend the background environment but keep it low-detail, slightly blurred (bokeh), or lower contrast. This area MUST be clean because the developer will overlay HTML text (H1 + Button) there. Do not put busy objects on the right.
-          `;
+          promptPrefix += " LAYOUT: Subject Anchored LEFT. Right side: Uncluttered environment extension (bokeh/blur) for text.";
       } else if (landingPosition === 'right') {
-           promptPrefix += `
-            \n**CRITICAL WEB LAYOUT RULE: SUBJECT RIGHT / COPY LEFT**
-            1. The User Actor must be positioned in the RIGHT 30-40% of the frame.
-            2. The LEFT 60% of the frame is the "COPY SPACE" (Negative Space).
-            3. INSTRUCTION FOR LEFT SIDE: Extend the background environment but keep it low-detail, slightly blurred (bokeh), or lower contrast. This area MUST be clean because the developer will overlay HTML text (H1 + Button) there. Do not put busy objects on the left.
-          `;
+           promptPrefix += " LAYOUT: Subject Anchored RIGHT. Left side: Uncluttered environment extension (bokeh/blur) for text.";
       } else {
-           promptPrefix += `
-            \n**CRITICAL WEB LAYOUT RULE: CENTERED HERO**
-            1. The User Actor must be centered.
-            2. The areas to the immediate Left and Right must be clean negative space for potential secondary text.
+           promptPrefix += " LAYOUT: Center Composition. Balanced negative space on sides.";
+      }
+  } else if (outputType === 'landing_mobile') {
+      aspectRatio = "9:16";
+      promptPrefix = "FORMAT: MOBILE LANDING PAGE (Vertical 9:16).";
+      
+      if (landingPosition === 'top') {
+          promptPrefix += `
+            LAYOUT: Subject in TOP half.
+            OUTPAINTING INSTRUCTION: Seamlessly extend the bottom of the environment (floor, ground, wall) downwards. 
+            Keep the bottom area low-detail (negative space) for UI buttons.
+          `;
+      } else if (landingPosition === 'bottom') {
+          promptPrefix += `
+            LAYOUT: Subject in BOTTOM half.
+            OUTPAINTING INSTRUCTION: Seamlessly extend the top of the environment (sky, ceiling, wall) upwards.
+            Keep the top area low-detail (negative space) for Headline text.
           `;
       }
   } else {
-      promptPrefix = "SQUARE FEED AD.";
+      promptPrefix = "FORMAT: SQUARE AD (1:1).";
   }
 
   // Text Handling Logic
-  const textInstruction = preserveText 
-    ? "TEXT MODE: MOCKUP. Attempt to simulate the typography/headline style found in IMAGE_1. The text doesn't need to be readable, but the visual weight and placement should match the reference to serve as a design mockup."
-    : "TEXT MODE: CLEAN PLATE. **CRITICAL**: DO NOT render any text, headlines, logos, or subtitles. Remove all typography found in IMAGE_1. The output must be a clean image (background + actor) only, ready for a developer to add HTML text.";
+  let textInstruction = "";
+  if (!preserveText) {
+      // Clean Plate
+      textInstruction = "TEXT: REMOVE ALL EXISTING TEXT/LOGOS from IMAGE_1. Clean Plate only.";
+  } else if (customText && customText.trim().length > 0) {
+      // Custom Text Replacement
+      textInstruction = `TEXT: REPLACE original text in IMAGE_1 with: "${customText}". MATCH the original font style, glow, and perspective exactly.`;
+  } else {
+      // Mockup / Copy Layout (No custom text)
+      textInstruction = "TEXT: KEEP original text layout style from IMAGE_1 as a mockup.";
+  }
 
   const prompt = `
-    ROLE: Senior VFX Compositor & Web Designer.
-    TASK: High-End Marketing Asset Generation.
-    FORMAT: ${promptPrefix}
+    ROLE: Senior Hollywood VFX Compositor.
+    TASK: High-End Photorealistic Face Replacement & Compositing.
+    ${promptPrefix}
     
     INPUTS:
-    - IMAGE_1: REFERENCE (Lighting, Layout, Mood).
-    - IMAGE_2: TALENT (Face & Identity Source).
-    ${analysisContext ? `- TECHNICAL ANALYSIS OF REF: ${analysisContext}` : ''}
+    - IMAGE_1 (Base Plate): The Master Reference. Contains the Scene, Lighting, Color Grading, Body Pose, and Composition.
+    - IMAGE_2 (Source Identity): The User's Face.
+    ${analysisContext ? `- TECH SPECS OF IMAGE_1: ${analysisContext}` : ''}
 
-    EXECUTION STEPS:
+    STRICT INSTRUCTIONS:
     
-    1. **SKELETON & POSE MAPPING**:
-       - Ignore the pose in IMAGE_2.
-       - Force the anatomy of the Talent (IMAGE_2) to match the EXACT skeletal pose, hand position, and spine rotation of the character in IMAGE_1.
-    
-    2. **RELIGHTING (The most important step)**:
-       - Analyze the light sources in IMAGE_1 (Key, Rim, Fill).
-       - Cast EXACTLY the same shadows onto the Talent's face.
-       - Match the "Light Wrap" effect from the background.
-       - **Skin Texture**: Must be hyper-realistic. Visible pores, subsurface scattering (SSS) on ears/nose.
-    
-    3. **COMPOSITION (Strict Adherence)**:
-       - If LANDING_HERO: You MUST respect the "Negative Space" instructions. The generated empty space must be usable for text overlay without contrast issues.
-       - If THUMBNAIL: Prioritize separation between subject and background (Pop out).
+    1. **FIDELITY TO IMAGE_1 (The Golden Rule)**:
+       - You MUST preserve the exact lighting direction, shadow hardness, color palette, and film grain of IMAGE_1.
+       - Do NOT create a "new" image style. Edit IMAGE_1.
+       - If IMAGE_1 is dark/moody, the output MUST be dark/moody.
+       - If IMAGE_1 has strong rim light, the new face MUST have that rim light.
+
+    2. **IDENTITY SWAP (The Core Task)**:
+       - Replace the head/face of the character in IMAGE_1 with the face from IMAGE_2.
+       - **CRITICAL**: Adapt the geometry of the face from IMAGE_2 to match the angle and perspective of IMAGE_1.
+       - **SKIN TEXTURE**: Apply the skin texture details (pores, sweat, grime) and lighting falloff of IMAGE_1 onto the face of IMAGE_2.
+       - **FACE SHAPE**: Keep the identity characteristics of IMAGE_2 (nose, eyes, mouth shape), but blend the jawline/head shape to fit the body in IMAGE_1 naturally.
+
+    3. **LAYOUT & COMPOSITION**:
+       - Respect the LAYOUT instructions defined in FORMAT.
+       - If creating "Negative Space" for Mobile/Web, do NOT leave it white/blank. **EXTEND THE ENVIRONMENT**. Continue the wall, sky, or background texture naturally so it looks like a wider/taller camera shot.
        - ${textInstruction}
-    
-    4. **FINAL GRADING**:
-       - Match the film grain, ISO noise, and color palette of IMAGE_1.
 
-    OUTPUT: Photorealistic, 4K, Commercial Grade.
+    4. **FINAL POLISH**:
+       - Check for "Uncanny Valley". Eyes must look at the correct focal point.
+       - Match shadows on the neck/collar.
+       - Final Output must be 4K Photorealistic.
+
     Output Format: ${outputType} (Ratio: ${aspectRatio}).
   `;
 
   try {
-    console.log(`Generating: ${outputType} | Position: ${landingPosition} | Text: ${preserveText}`);
+    console.log(`Generating: ${outputType} | Position: ${landingPosition} | Text Mode: ${preserveText ? (customText ? 'Custom' : 'Mockup') : 'Clean'}`);
     
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
