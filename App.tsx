@@ -62,6 +62,13 @@ const App: React.FC = () => {
   // Check for API key on mount
   useEffect(() => {
     const checkKey = async () => {
+      // Priority 1: Check standard env var (Vercel / Build)
+      if (process.env.API_KEY) {
+        setApiKeySet(true);
+        return;
+      }
+
+      // Priority 2: Check AI Studio Runtime
       const aiStudio = (window as any).aistudio;
       if (aiStudio && await aiStudio.hasSelectedApiKey()) {
         setApiKeySet(true);
@@ -182,6 +189,18 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error(error);
       const msg = error.message || 'Unknown error';
+
+      if (msg.includes('Requested entity was not found')) {
+        setApiKeySet(false);
+        const aiStudio = (window as any).aistudio;
+        if (aiStudio) {
+            await aiStudio.openSelectKey();
+            setApiKeySet(true);
+            updateStep('5', 'error', 'API Key refreshed. Please click Generate again.');
+            return;
+        }
+      }
+
       // Truncate long error messages for the UI, but keep enough to be useful
       const displayMsg = msg.length > 50 ? 'Generation failed: Check console for details' : msg;
       updateStep('5', 'error', displayMsg);
@@ -199,13 +218,22 @@ const App: React.FC = () => {
           </div>
           <h1 className="text-3xl font-bold tracking-tight">CineMorph SaaS</h1>
           <p className="text-zinc-400">Please select a valid Google Gemini API Key (paid project required) to access the professional rendering engine.</p>
-          <button 
-            onClick={handleApiKeySelect}
-            className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-medium transition-colors"
-          >
-            <Key className="w-4 h-4" />
-            Select API Key
-          </button>
+          <div className="space-y-3">
+            {/* Show Select Button only if AI Studio Runtime is detected, otherwise rely on Env Var */}
+            {(window as any).aistudio ? (
+              <button 
+                onClick={handleApiKeySelect}
+                className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-medium transition-colors"
+              >
+                <Key className="w-4 h-4" />
+                Select API Key via AI Studio
+              </button>
+            ) : (
+              <div className="p-3 bg-zinc-800 rounded-lg text-xs text-zinc-400 border border-zinc-700">
+                Environment Variable <code>API_KEY</code> is missing. Please configure it in Vercel Project Settings.
+              </div>
+            )}
+          </div>
            <a 
             href="https://ai.google.dev/gemini-api/docs/billing" 
             target="_blank" 
