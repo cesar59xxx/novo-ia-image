@@ -20,7 +20,11 @@ import {
   AlignCenter,
   AlignRight,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  PenTool,
+  Quote,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 import { OutputType, LandingPosition, ProcessingStep } from './types';
 import { generateFinalPoster, analyzeImageStructure, refinePoster } from './services/geminiService';
@@ -34,11 +38,19 @@ const App: React.FC = () => {
   const [apiKeySet, setApiKeySet] = useState(false);
 
   // State: Inputs
+  const [useActor, setUseActor] = useState(true); // Toggle for Actor
   const [actorFile, setActorFile] = useState<File | null>(null);
   const [actorPreview, setActorPreview] = useState<string | null>(null);
+  
+  // State: Reference Mode (Image vs Prompt)
+  const [refMode, setRefMode] = useState<'image' | 'prompt'>('image');
   const [refFile, setRefFile] = useState<File | null>(null);
   const [refPreview, setRefPreview] = useState<string | null>(null);
   
+  // Prompts
+  const [creativePrompt, setCreativePrompt] = useState(''); // Used for "AI Scene Gen" mode
+  const [refModificationPrompt, setRefModificationPrompt] = useState(''); // Used for "Ref Mode" modification
+
   // State: Configuration
   const [outputType, setOutputType] = useState<OutputType>(OutputType.AD_FEED);
   const [landingPos, setLandingPos] = useState<LandingPosition>(LandingPosition.CENTER);
@@ -55,7 +67,7 @@ const App: React.FC = () => {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [steps, setSteps] = useState<ProcessingStep[]>([
     { id: '1', name: 'Segmentation Engine', status: 'pending', details: 'Waiting for inputs' },
-    { id: '2', name: 'Hero Replacement', status: 'pending' },
+    { id: '2', name: 'Subject Integration', status: 'pending' },
     { id: '3', name: 'Relighting & Texture', status: 'pending' },
     { id: '4', name: 'Identity Blocker', status: 'pending' },
     { id: '5', name: 'Final 4K Render', status: 'pending' },
@@ -68,13 +80,10 @@ const App: React.FC = () => {
   // Check for API key on mount
   useEffect(() => {
     const checkKey = async () => {
-      // Priority 1: Check standard env var (Vercel / Build)
       if (process.env.API_KEY) {
         setApiKeySet(true);
         return;
       }
-
-      // Priority 2: Check AI Studio Runtime
       const aiStudio = (window as any).aistudio;
       if (aiStudio && await aiStudio.hasSelectedApiKey()) {
         setApiKeySet(true);
@@ -88,13 +97,11 @@ const App: React.FC = () => {
     if (outputType === OutputType.LANDING_HERO || outputType === OutputType.LANDING_MOBILE) {
       if (landingDevice === 'desktop') {
         setOutputType(OutputType.LANDING_HERO);
-        // Reset to valid horizontal pos if needed
         if (landingPos === LandingPosition.TOP || landingPos === LandingPosition.BOTTOM) {
             setLandingPos(LandingPosition.CENTER);
         }
       } else {
         setOutputType(OutputType.LANDING_MOBILE);
-        // Reset to valid vertical pos if needed
         if (landingPos === LandingPosition.LEFT || landingPos === LandingPosition.RIGHT || landingPos === LandingPosition.CENTER) {
             setLandingPos(LandingPosition.TOP);
         }
@@ -106,7 +113,6 @@ const App: React.FC = () => {
     const aiStudio = (window as any).aistudio;
     if (aiStudio) {
       await aiStudio.openSelectKey();
-      // Assume success to handle race condition where hasSelectedApiKey might lag
       setApiKeySet(true);
     }
   };
@@ -122,7 +128,6 @@ const App: React.FC = () => {
       } else {
         setRefFile(file);
         setRefPreview(preview);
-        // Trigger auto-analysis when reference is uploaded
         handleAnalyze(file);
       }
     }
@@ -138,7 +143,6 @@ const App: React.FC = () => {
       setSteps(prev => prev.map(s => s.id === '1' ? { ...s, status: 'completed', details: 'Lighting topology mapped' } : s));
     } catch (e) {
       console.error(e);
-      // Analysis is optional for generation, so we don't block the user, just show status
       setSteps(prev => prev.map(s => s.id === '1' ? { ...s, status: 'completed', details: 'Analysis skipped (auto-mode)' } : s));
     } finally {
       setIsAnalyzing(false);
@@ -150,27 +154,33 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-    if (!actorFile || !refFile || !apiKeySet) return;
+    // Validation: 
+    // Must have API Key
+    // Must have EITHER (Ref File) OR (Creative Prompt)
+    // If useActor is true, Must have Actor File
+    const hasContext = (refMode === 'image' && refFile) || (refMode === 'prompt' && creativePrompt.trim().length > 0);
+    const hasActorRequirement = !useActor || (useActor && actorFile);
+    
+    if (!apiKeySet || !hasContext || !hasActorRequirement) return;
 
     setIsProcessing(true);
     setGeneratedImage(null);
     
-    // Reset steps but keep analysis if done
     setSteps(prev => prev.map(s => {
-      if (s.id === '1' && analysisText) return s; // Keep segmentation status if valid
+      if (s.id === '1' && analysisText && refMode === 'image') return s;
+      if (s.id === '1' && refMode === 'prompt') return { ...s, status: 'completed', details: 'Generative Scene Mode' };
       return { ...s, status: 'pending', details: undefined };
     }));
     
     try {
-      // Step 1 check
-      if (!analysisText) updateStep('1', 'completed', 'Using fast segmentation');
+      if (refMode === 'image' && !analysisText) updateStep('1', 'completed', 'Using fast segmentation');
       
-      updateStep('2', 'processing', 'Skeleton mapping & Pose transfer...');
-      await new Promise(r => setTimeout(r, 1000)); 
+      updateStep('2', 'processing', useActor ? 'Skeleton mapping & Pose transfer...' : 'Composition Analysis...');
+      await new Promise(r => setTimeout(r, 800)); 
       updateStep('2', 'completed');
 
-      updateStep('3', 'processing', 'Raytraced Shadow & Skin SSS...');
-      await new Promise(r => setTimeout(r, 1000));
+      updateStep('3', 'processing', refMode === 'prompt' ? 'Generating 8k Environment...' : 'Raytraced Shadow & Lighting...');
+      await new Promise(r => setTimeout(r, 800));
       updateStep('3', 'completed');
 
       updateStep('4', 'processing', 'Compositing Layout & Breathing Room...');
@@ -178,15 +188,18 @@ const App: React.FC = () => {
 
       updateStep('5', 'processing', 'Final 4K Texture Grading...');
       
-      // Pass the analysis text to the generator for better context
+      // Determine effective prompt based on mode
+      const effectivePrompt = refMode === 'image' ? refModificationPrompt : creativePrompt;
+
       const resultImageUrl = await generateFinalPoster(
-        actorFile, 
-        refFile, 
+        useActor ? actorFile : null, 
+        refMode === 'image' ? refFile : null, 
         outputType, 
         landingPos, 
         analysisText || undefined,
         preserveText,
-        customText
+        customText,
+        effectivePrompt 
       );
       
       setGeneratedImage(resultImageUrl);
@@ -195,7 +208,6 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error(error);
       const msg = error.message || 'Unknown error';
-
       if (msg.includes('Requested entity was not found')) {
         setApiKeySet(false);
         const aiStudio = (window as any).aistudio;
@@ -206,9 +218,7 @@ const App: React.FC = () => {
             return;
         }
       }
-
-      // Truncate long error messages for the UI, but keep enough to be useful
-      const displayMsg = msg.length > 50 ? 'Generation failed: Check console for details' : msg;
+      const displayMsg = msg.length > 50 ? 'Generation failed: Check console' : msg;
       updateStep('5', 'error', displayMsg);
     } finally {
       setIsProcessing(false);
@@ -217,14 +227,12 @@ const App: React.FC = () => {
 
   const handleRefine = async () => {
     if (!generatedImage || !refinePrompt.trim() || isRefining) return;
-    
     setIsRefining(true);
     updateStep('5', 'processing', 'Applying Magic Fix...');
-
     try {
       const refinedImageUrl = await refinePoster(generatedImage, refinePrompt, outputType);
       setGeneratedImage(refinedImageUrl);
-      setRefinePrompt(''); // Clear prompt
+      setRefinePrompt(''); 
       updateStep('5', 'completed', 'Refinement applied successfully');
     } catch (error: any) {
       console.error(error);
@@ -242,31 +250,16 @@ const App: React.FC = () => {
             <Wand2 className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight">CineMorph SaaS</h1>
-          <p className="text-zinc-400">Please select a valid Google Gemini API Key (paid project required) to access the professional rendering engine.</p>
+          <p className="text-zinc-400">Please select a valid Google Gemini API Key.</p>
           <div className="space-y-3">
-            {/* Show Select Button only if AI Studio Runtime is detected, otherwise rely on Env Var */}
             {(window as any).aistudio ? (
-              <button 
-                onClick={handleApiKeySelect}
-                className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-medium transition-colors"
-              >
-                <Key className="w-4 h-4" />
-                Select API Key via AI Studio
+              <button onClick={handleApiKeySelect} className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-medium transition-colors">
+                <Key className="w-4 h-4" /> Select API Key via AI Studio
               </button>
             ) : (
-              <div className="p-3 bg-zinc-800 rounded-lg text-xs text-zinc-400 border border-zinc-700">
-                Environment Variable <code>API_KEY</code> is missing. Please configure it in Vercel Project Settings.
-              </div>
+              <div className="p-3 bg-zinc-800 rounded-lg text-xs text-zinc-400 border border-zinc-700">API_KEY Missing</div>
             )}
           </div>
-           <a 
-            href="https://ai.google.dev/gemini-api/docs/billing" 
-            target="_blank" 
-            rel="noreferrer"
-            className="text-xs text-zinc-500 hover:text-zinc-300 block"
-          >
-            View Billing Documentation
-          </a>
         </div>
       </div>
     );
@@ -274,6 +267,11 @@ const App: React.FC = () => {
 
   const isWideFormat = outputType === OutputType.LANDING_HERO || outputType === OutputType.THUMBNAIL;
   const isVerticalFormat = outputType === OutputType.AD_STORIES || outputType === OutputType.LANDING_MOBILE;
+
+  // Validation Logic
+  const hasContext = (refMode === 'image' && refFile) || (refMode === 'prompt' && creativePrompt.trim().length > 0);
+  const hasActorRequirement = !useActor || (useActor && actorFile);
+  const isGenerateDisabled = !hasContext || !hasActorRequirement || isProcessing || isRefining;
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-200 overflow-hidden font-sans">
@@ -294,67 +292,138 @@ const App: React.FC = () => {
           
           {/* 1. Actor Upload */}
           <section>
-            <h2 className="text-sm font-semibold text-zinc-100 mb-4 flex items-center gap-2">
-              <User className="w-4 h-4 text-indigo-400" />
-              1. User Actor Photo
-            </h2>
-            <div className="relative group">
-              <input 
-                type="file" 
-                accept="image/*"
-                onChange={(e) => handleFileUpload(e, 'actor')}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-              <div className={`border-2 border-dashed rounded-xl p-4 transition-all ${actorPreview ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-zinc-700 hover:border-zinc-500 bg-zinc-800/50'}`}>
-                {actorPreview ? (
-                  <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg">
-                    <img src={actorPreview} alt="Actor" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-xs font-medium text-white">Change Photo</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
-                    <UploadCloud className="w-8 h-8 mb-2" />
-                    <p className="text-xs">Upload Hero (Clear Face)</p>
-                  </div>
-                )}
-              </div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <User className={`w-4 h-4 ${useActor ? 'text-indigo-400' : 'text-zinc-600'}`} />
+                1. Hero Subject
+              </h2>
+              <button 
+                onClick={() => setUseActor(!useActor)}
+                className="text-zinc-400 hover:text-indigo-400 transition-colors"
+                title="Toggle Actor"
+              >
+                {useActor ? <ToggleRight className="w-6 h-6 text-indigo-500" /> : <ToggleLeft className="w-6 h-6 text-zinc-600" />}
+              </button>
             </div>
+            
+            {useActor ? (
+              <div className="relative group animate-in fade-in slide-in-from-left-2 duration-300">
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  onChange={(e) => handleFileUpload(e, 'actor')}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div className={`border-2 border-dashed rounded-xl p-4 transition-all ${actorPreview ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-zinc-700 hover:border-zinc-500 bg-zinc-800/50'}`}>
+                  {actorPreview ? (
+                    <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg">
+                      <img src={actorPreview} alt="Actor" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <p className="text-xs font-medium text-white">Change Photo</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
+                      <UploadCloud className="w-8 h-8 mb-2" />
+                      <p className="text-xs">Upload Hero (Clear Face)</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-zinc-800/50 rounded-lg border border-zinc-800 text-center">
+                <p className="text-xs text-zinc-500">Actor disabled. Using existing reference subject or generating new character.</p>
+              </div>
+            )}
           </section>
 
-          {/* 2. Reference Upload */}
+          {/* 2. Scene / Layout Selection */}
           <section>
             <h2 className="text-sm font-semibold text-zinc-100 mb-4 flex items-center gap-2">
               <ImageIcon className="w-4 h-4 text-purple-400" />
-              2. Layout Reference
+              2. Scene & Layout
             </h2>
-            <div className="relative group">
-               <input 
-                type="file" 
-                accept="image/*"
-                onChange={(e) => handleFileUpload(e, 'ref')}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-               <div className={`border-2 border-dashed rounded-xl p-4 transition-all ${refPreview ? 'border-purple-500/50 bg-purple-500/5' : 'border-zinc-700 hover:border-zinc-500 bg-zinc-800/50'}`}>
-                {refPreview ? (
-                  <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg">
-                    <img src={refPreview} alt="Reference" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-xs font-medium text-white">Change Layout</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
-                    <UploadCloud className="w-8 h-8 mb-2" />
-                    <p className="text-xs">Upload Poster Base</p>
-                  </div>
-                )}
-              </div>
+
+            {/* Mode Toggle */}
+            <div className="flex bg-zinc-800 p-1 rounded-lg mb-4">
+               <button
+                  onClick={() => setRefMode('image')}
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md transition-all ${
+                    refMode === 'image' ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+               >
+                 <UploadCloud className="w-3 h-3" /> Reference
+               </button>
+               <button
+                  onClick={() => setRefMode('prompt')}
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-medium rounded-md transition-all ${
+                    refMode === 'prompt' ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+               >
+                 <PenTool className="w-3 h-3" /> Gen Scene
+               </button>
             </div>
-            
-            <MaskGallery referenceImage={refPreview} isAnalyzing={isAnalyzing} isAnalyzed={!!analysisText} />
-            <AnalysisPanel analysisText={analysisText} isAnalyzing={isAnalyzing} />
+
+            {refMode === 'image' ? (
+              <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div className="relative group">
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={(e) => handleFileUpload(e, 'ref')}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  />
+                  <div className={`border-2 border-dashed rounded-xl p-4 transition-all ${refPreview ? 'border-purple-500/50 bg-purple-500/5' : 'border-zinc-700 hover:border-zinc-500 bg-zinc-800/50'}`}>
+                    {refPreview ? (
+                      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg">
+                        <img src={refPreview} alt="Reference" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <p className="text-xs font-medium text-white">Change Layout</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
+                        <UploadCloud className="w-8 h-8 mb-2" />
+                        <p className="text-xs">Upload Poster Base</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Optional Creative Direction for Reference Mode */}
+                <div className="relative">
+                    <input 
+                       type="text"
+                       value={refModificationPrompt}
+                       onChange={(e) => setRefModificationPrompt(e.target.value)}
+                       placeholder="Optional: 'Change background to Mars', 'Make it cyberpunk'..."
+                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-[11px] text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                    <Sparkles className="absolute right-2 top-2.5 w-3 h-3 text-zinc-500" />
+                </div>
+
+                <MaskGallery referenceImage={refPreview} isAnalyzing={isAnalyzing} isAnalyzed={!!analysisText} />
+                <AnalysisPanel analysisText={analysisText} isAnalyzing={isAnalyzing} />
+              </div>
+            ) : (
+              // Prompt Mode UI
+              <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+                 <div className="relative">
+                    <textarea 
+                       value={creativePrompt}
+                       onChange={(e) => setCreativePrompt(e.target.value)}
+                       placeholder="Describe the movie scene: 'A futuristic cyberpunk city with neon rain' or 'A medieval battlefield during sunset'..."
+                       className="w-full h-32 bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none"
+                    />
+                    <Quote className="absolute bottom-3 right-3 w-4 h-4 text-zinc-600" />
+                 </div>
+                 <p className="text-[10px] text-zinc-500 mt-2">
+                   {useActor 
+                    ? "AI will generate a unique 4K background and integrate the actor automatically." 
+                    : "AI will generate a complete movie poster from scratch based on this prompt."}
+                 </p>
+              </div>
+            )}
           </section>
 
           {/* 3. Output Specs */}
@@ -416,7 +485,6 @@ const App: React.FC = () => {
               {/* Landing Page Settings (Desktop vs Mobile) */}
               {(outputType === OutputType.LANDING_HERO || outputType === OutputType.LANDING_MOBILE) && (
                 <div className="bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50 space-y-3">
-                   {/* Device Toggle */}
                    <div className="flex bg-zinc-800 p-1 rounded-lg">
                       <button
                         onClick={() => setLandingDevice('desktop')}
@@ -435,7 +503,6 @@ const App: React.FC = () => {
                         <Smartphone className="w-3 h-3" /> Mobile (9:16)
                       </button>
                    </div>
-
                    {/* Positioning Logic */}
                    <div>
                      <label className="text-xs text-indigo-400 mb-2 block font-medium">
@@ -443,7 +510,6 @@ const App: React.FC = () => {
                      </label>
                      
                      {landingDevice === 'desktop' ? (
-                       // Desktop Controls (Left/Center/Right)
                        <div className="flex bg-zinc-800 p-1 rounded-lg">
                          {[LandingPosition.LEFT, LandingPosition.CENTER, LandingPosition.RIGHT].map((pos) => (
                            <button
@@ -461,7 +527,6 @@ const App: React.FC = () => {
                          ))}
                        </div>
                      ) : (
-                        // Mobile Controls (Top/Bottom)
                         <div className="flex bg-zinc-800 p-1 rounded-lg">
                            <button
                             onClick={() => setLandingPos(LandingPosition.TOP)}
@@ -482,14 +547,6 @@ const App: React.FC = () => {
                         </div>
                      )}
                    </div>
-                   
-                   <p className="text-[10px] text-zinc-500 text-center leading-tight">
-                     {landingDevice === 'desktop' && landingPos === LandingPosition.LEFT && "Clean space on RIGHT for H1."}
-                     {landingDevice === 'desktop' && landingPos === LandingPosition.RIGHT && "Clean space on LEFT for H1."}
-                     {landingDevice === 'desktop' && landingPos === LandingPosition.CENTER && "Clean space on SIDES."}
-                     {landingDevice === 'mobile' && landingPos === LandingPosition.TOP && "Image Top 40% / Clean Btm 60%."}
-                     {landingDevice === 'mobile' && landingPos === LandingPosition.BOTTOM && "Image Btm 40% / Clean Top 60%."}
-                   </p>
                 </div>
               )}
 
@@ -515,7 +572,6 @@ const App: React.FC = () => {
                   </button>
                 </div>
                 
-                {/* Custom Text Input - Only shows when "Layout & Text" is active */}
                 {preserveText && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                     <input 
@@ -525,9 +581,6 @@ const App: React.FC = () => {
                       placeholder="Optional: Enter custom headline..."
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
-                    <p className="text-[10px] text-zinc-500 mt-1 ml-1">
-                      {customText ? 'AI will render this specific text.' : 'AI will mimic reference text.'}
-                    </p>
                   </div>
                 )}
               </div>
@@ -539,9 +592,9 @@ const App: React.FC = () => {
         <div className="p-6 border-t border-zinc-800 bg-zinc-900/50">
           <button
             onClick={handleGenerate}
-            disabled={!actorFile || !refFile || isProcessing || isRefining}
+            disabled={isGenerateDisabled}
             className={`w-full py-4 rounded-xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg ${
-              !actorFile || !refFile || isProcessing || isRefining
+              isGenerateDisabled
                 ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                 : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25 hover:scale-[1.02]'
             }`}
@@ -684,10 +737,12 @@ const App: React.FC = () => {
              <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg p-4">
                 <h4 className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider mb-2">Technical Constraints</h4>
                 <ul className="space-y-2">
-                   <li className="text-xs text-zinc-400 flex items-start gap-2">
-                      <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
-                      Identity leakage blocked
-                   </li>
+                   {useActor && (
+                      <li className="text-xs text-zinc-400 flex items-start gap-2">
+                        <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
+                        Identity leakage blocked
+                      </li>
+                   )}
                    <li className="text-xs text-zinc-400 flex items-start gap-2">
                       <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
                       Shadow matte reconstruction active
@@ -704,11 +759,11 @@ const App: React.FC = () => {
                         9:16 Vertical Ratio
                       </li>
                    )}
-                   {customText && (
-                      <li className="text-xs text-zinc-400 flex items-start gap-2">
-                        <span className="w-1 h-1 bg-indigo-500 rounded-full mt-1.5"></span>
-                        Custom Text Rendering
-                      </li>
+                   {refMode === 'prompt' && (
+                     <li className="text-xs text-zinc-400 flex items-start gap-2">
+                       <span className="w-1 h-1 bg-purple-500 rounded-full mt-1.5"></span>
+                       Generative Environment Mode
+                     </li>
                    )}
                 </ul>
              </div>

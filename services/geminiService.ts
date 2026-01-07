@@ -70,147 +70,164 @@ export const analyzeImageStructure = async (imageFile: File): Promise<string> =>
 };
 
 /**
- * Generates the final poster by swapping the actor.
- * Uses gemini-3-pro-image-preview for high quality generation.
- * heavily optimized for Landing Page layouts and Realistic Textures.
+ * Generates the final poster.
+ * Supports 4 modes:
+ * 1. Actor + Reference (Face Swap)
+ * 2. Actor + Prompt (Generative Scene)
+ * 3. Reference + Prompt (Style/Variation - No Actor)
+ * 4. Prompt Only (Text to Image - No Actor)
  */
 export const generateFinalPoster = async (
-  actorFile: File,
-  referenceFile: File,
+  actorFile: File | null, // Now Optional
+  referenceFile: File | null, // Optional
   outputType: string,
   landingPosition: string = 'center',
   analysisContext?: string,
   preserveText: boolean = false,
-  customText: string = ''
+  customText: string = '',
+  creativePrompt: string = '' // Scene description or Modification instruction
 ): Promise<string> => {
   const ai = getAiClient();
-  
-  // Ensure we can read the files before calling API
-  const [actorBase64, referenceBase64] = await Promise.all([
-    fileToBase64(actorFile),
-    fileToBase64(referenceFile)
-  ]);
+  const contentParts: any[] = [];
 
+  // 1. Prepare Inputs
+  let actorBase64: string | null = null;
+  if (actorFile) {
+      actorBase64 = await fileToBase64(actorFile);
+  }
+
+  let referenceBase64: string | null = null;
+  if (referenceFile) {
+    referenceBase64 = await fileToBase64(referenceFile);
+  }
+
+  // 2. Prepare Format Instructions
   let aspectRatio = "1:1";
-  let promptPrefix = "";
+  let formatInstruction = "";
   
-  // Logic for specific formats
   if (outputType === 'ad_stories') {
       aspectRatio = "9:16";
-      promptPrefix = "FORMAT: SOCIAL MEDIA STORY (9:16). Extend background vertically if needed.";
+      formatInstruction = "FORMAT: SOCIAL MEDIA STORY (9:16). Vertical Composition.";
   } else if (outputType === 'thumbnail') {
       aspectRatio = "16:9";
-      promptPrefix = `
-        FORMAT: YOUTUBE THUMBNAIL (16:9).
-        - COMPOSITION: High Contrast, Subject Pop, Rule of Thirds.
-        - LIGHTING: Emphasize Rim Light for separation.
-      `;
+      formatInstruction = `FORMAT: YOUTUBE THUMBNAIL (16:9). High Contrast, Rule of Thirds.`;
   } else if (outputType === 'landing_hero') {
       aspectRatio = "16:9";
-      promptPrefix = "FORMAT: CINEMATIC WEB HEADER (16:9).";
-      
-      if (landingPosition === 'left') {
-          promptPrefix += " LAYOUT: Subject Anchored LEFT. Right side: Uncluttered environment extension (bokeh/blur) for text.";
-      } else if (landingPosition === 'right') {
-           promptPrefix += " LAYOUT: Subject Anchored RIGHT. Left side: Uncluttered environment extension (bokeh/blur) for text.";
-      } else {
-           promptPrefix += " LAYOUT: Center Composition. Balanced negative space on sides.";
-      }
+      formatInstruction = "FORMAT: CINEMATIC WEB HEADER (16:9).";
+      if (landingPosition === 'left') formatInstruction += " LAYOUT: Subject Anchored LEFT. Right side: Negative space.";
+      else if (landingPosition === 'right') formatInstruction += " LAYOUT: Subject Anchored RIGHT. Left side: Negative space.";
+      else formatInstruction += " LAYOUT: Center Composition.";
   } else if (outputType === 'landing_mobile') {
       aspectRatio = "9:16";
-      promptPrefix = "FORMAT: MOBILE LANDING PAGE (Vertical 9:16).";
-      
-      if (landingPosition === 'top') {
-          promptPrefix += `
-            LAYOUT: Subject in TOP half.
-            OUTPAINTING INSTRUCTION: Seamlessly extend the bottom of the environment (floor, ground, wall) downwards. 
-            Keep the bottom area low-detail (negative space) for UI buttons.
-          `;
-      } else if (landingPosition === 'bottom') {
-          promptPrefix += `
-            LAYOUT: Subject in BOTTOM half.
-            OUTPAINTING INSTRUCTION: Seamlessly extend the top of the environment (sky, ceiling, wall) upwards.
-            Keep the top area low-detail (negative space) for Headline text.
-          `;
-      }
+      formatInstruction = "FORMAT: MOBILE LANDING PAGE (Vertical 9:16).";
+      if (landingPosition === 'top') formatInstruction += " LAYOUT: Subject in TOP half. Clean negative space at BOTTOM.";
+      else if (landingPosition === 'bottom') formatInstruction += " LAYOUT: Subject in BOTTOM half. Clean negative space at TOP.";
   } else {
-      promptPrefix = "FORMAT: SQUARE AD (1:1).";
+      formatInstruction = "FORMAT: SQUARE AD (1:1).";
   }
 
-  // Text Handling Logic
+  // 3. Prepare Text Overlay Instructions
   let textInstruction = "";
-  if (!preserveText) {
-      // Clean Plate
-      textInstruction = "TEXT: REMOVE ALL EXISTING TEXT/LOGOS from IMAGE_1. Clean Plate only.";
-  } else if (customText && customText.trim().length > 0) {
-      // Custom Text Replacement
-      textInstruction = `TEXT: REPLACE original text in IMAGE_1 with: "${customText}". MATCH the original font style, glow, and perspective exactly.`;
-  } else {
-      // Mockup / Copy Layout (No custom text)
-      textInstruction = "TEXT: KEEP original text layout style from IMAGE_1 as a mockup.";
+  if (customText && customText.trim().length > 0) {
+      textInstruction = `TEXT RENDER: Render the title "${customText}" in the image with cinematic typography fitting the scene.`;
+  } else if (!preserveText) {
+      textInstruction = "TEXT: No text. Clean image.";
   }
 
-  const prompt = `
-    ROLE: Senior Hollywood VFX Compositor.
-    TASK: High-End Photorealistic Face Replacement & Compositing.
-    ${promptPrefix}
+  // 4. Build Prompt & Content Parts based on Scenario
+  let systemPrompt = "";
+
+  if (actorFile && actorBase64 && referenceFile && referenceBase64) {
+    // === SCENARIO 1: ACTOR + REFERENCE (Classic Face Swap) ===
+    contentParts.push({ inlineData: { mimeType: referenceFile.type, data: referenceBase64 } }); // IMAGE_1
+    contentParts.push({ inlineData: { mimeType: actorFile.type, data: actorBase64 } });       // IMAGE_2
     
-    INPUTS:
-    - IMAGE_1 (Base Plate): The Master Reference. Contains the Scene, Lighting, Color Grading, Body Pose, and Composition.
-    - IMAGE_2 (Source Identity): The User's Face.
-    ${analysisContext ? `- TECH SPECS OF IMAGE_1: ${analysisContext}` : ''}
+    systemPrompt = `
+      ROLE: Senior VFX Compositor.
+      TASK: Face Replacement & Relighting.
+      ${formatInstruction}
+      
+      INPUTS:
+      - IMAGE_1 (Base Plate): Master Reference.
+      - IMAGE_2 (Source): User Identity.
+      ${analysisContext ? `- TECH SPECS: ${analysisContext}` : ''}
+      ${creativePrompt ? `- ADDITIONAL INSTRUCTION: ${creativePrompt}` : ''}
 
-    STRICT INSTRUCTIONS:
+      INSTRUCTIONS:
+      1. Replace the face in IMAGE_1 with the face from IMAGE_2.
+      2. PRESERVE IMAGE_1's lighting, shadows, and color grading exactly.
+      3. Adapt IMAGE_2's head geometry to match IMAGE_1's angle.
+      4. ${textInstruction}
+    `;
+
+  } else if (actorFile && actorBase64 && !referenceFile) {
+    // === SCENARIO 2: ACTOR + PROMPT (Generative Scene) ===
+    contentParts.push({ inlineData: { mimeType: actorFile.type, data: actorBase64 } }); // IMAGE_1
     
-    1. **FIDELITY TO IMAGE_1 (The Golden Rule)**:
-       - You MUST preserve the exact lighting direction, shadow hardness, color palette, and film grain of IMAGE_1.
-       - Do NOT create a "new" image style. Edit IMAGE_1.
-       - If IMAGE_1 is dark/moody, the output MUST be dark/moody.
-       - If IMAGE_1 has strong rim light, the new face MUST have that rim light.
+    systemPrompt = `
+      ROLE: Movie Poster Concept Artist.
+      TASK: Create a scene featuring the Actor.
+      ${formatInstruction}
+      
+      INPUTS:
+      - IMAGE_1: The Main Actor.
+      - SCENE DESCRIPTION: "${creativePrompt}"
 
-    2. **IDENTITY SWAP (The Core Task)**:
-       - Replace the head/face of the character in IMAGE_1 with the face from IMAGE_2.
-       - **CRITICAL**: Adapt the geometry of the face from IMAGE_2 to match the angle and perspective of IMAGE_1.
-       - **SKIN TEXTURE**: Apply the skin texture details (pores, sweat, grime) and lighting falloff of IMAGE_1 onto the face of IMAGE_2.
-       - **FACE SHAPE**: Keep the identity characteristics of IMAGE_2 (nose, eyes, mouth shape), but blend the jawline/head shape to fit the body in IMAGE_1 naturally.
+      INSTRUCTIONS:
+      1. GENERATE a high-end cinematic environment based on the SCENE DESCRIPTION.
+      2. PLACE the actor from IMAGE_1 into this scene.
+      3. Match lighting and reflections on the actor to the new environment.
+      4. ${textInstruction}
+    `;
 
-    3. **LAYOUT & COMPOSITION**:
-       - Respect the LAYOUT instructions defined in FORMAT.
-       - If creating "Negative Space" for Mobile/Web, do NOT leave it white/blank. **EXTEND THE ENVIRONMENT**. Continue the wall, sky, or background texture naturally so it looks like a wider/taller camera shot.
-       - ${textInstruction}
+  } else if (!actorFile && referenceFile && referenceBase64) {
+    // === SCENARIO 3: REFERENCE + PROMPT (No Actor - Style/Variation) ===
+    contentParts.push({ inlineData: { mimeType: referenceFile.type, data: referenceBase64 } }); // IMAGE_1
+    
+    systemPrompt = `
+      ROLE: Creative Director / Art Director.
+      TASK: Reimagine the Reference Image.
+      ${formatInstruction}
+      
+      INPUTS:
+      - IMAGE_1: Visual Reference (Composition/Lighting Base).
+      - CREATIVE DIRECTION: "${creativePrompt}"
 
-    4. **FINAL POLISH**:
-       - Check for "Uncanny Valley". Eyes must look at the correct focal point.
-       - Match shadows on the neck/collar.
-       - Final Output must be 4K Photorealistic.
+      INSTRUCTIONS:
+      1. Generate a NEW image that respects the composition and lighting structure of IMAGE_1.
+      2. APPLY the CREATIVE DIRECTION to transform the content, style, or subject matter.
+      3. If the prompt asks to change the person/character, generate a new fictional character fitting the description.
+      4. Maintain the professional "movie poster" aesthetic of the reference.
+      5. ${textInstruction}
+    `;
 
-    Output Format: ${outputType} (Ratio: ${aspectRatio}).
-  `;
+  } else if (!actorFile && !referenceFile && creativePrompt) {
+    // === SCENARIO 4: PROMPT ONLY (Text to Image) ===
+    systemPrompt = `
+      ROLE: AI Image Generator.
+      TASK: Create a Movie Poster from scratch.
+      ${formatInstruction}
+      
+      PROMPT: "${creativePrompt}"
+
+      INSTRUCTIONS:
+      1. Generate a Photorealistic, 8k resolution cinematic image based on the PROMPT.
+      2. Ensure high dynamic range and dramatic lighting.
+      3. ${textInstruction}
+    `;
+  } else {
+    throw new Error("Invalid Input Combination. Please provide at least an Actor, a Reference, or a Prompt.");
+  }
+
+  // Add the prompt
+  contentParts.push({ text: systemPrompt });
 
   try {
-    console.log(`Generating: ${outputType} | Position: ${landingPosition} | Text Mode: ${preserveText ? (customText ? 'Custom' : 'Mockup') : 'Clean'}`);
+    console.log(`Generating with mode: Actor=${!!actorFile}, Ref=${!!referenceFile}, Prompt=${!!creativePrompt}`);
     
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: referenceFile.type,
-              data: referenceBase64
-            }
-          },
-          {
-            inlineData: {
-              mimeType: actorFile.type,
-              data: actorBase64
-            }
-          },
-          {
-            text: prompt
-          }
-        ]
-      },
+      contents: { parts: contentParts },
       config: {
         imageConfig: {
           aspectRatio: aspectRatio as any,
@@ -218,8 +235,6 @@ export const generateFinalPoster = async (
         }
       }
     });
-
-    console.log("Response received", response);
 
     const candidates = response.candidates;
     if (candidates && candidates.length > 0) {
@@ -231,9 +246,7 @@ export const generateFinalPoster = async (
             }
         }
         const textPart = parts.find(p => p.text);
-        if (textPart?.text) {
-             throw new Error(`Model Refusal: ${textPart.text}`);
-        }
+        if (textPart?.text) throw new Error(`Model Refusal: ${textPart.text}`);
       }
     }
     
@@ -246,16 +259,13 @@ export const generateFinalPoster = async (
 
 /**
  * Refines an existing generated image based on a specific user instruction.
- * This is akin to a "Photoshop Request".
  */
 export const refinePoster = async (
-  currentImageBase64: string, // The image to fix (full data URL)
+  currentImageBase64: string,
   refinementPrompt: string,
   outputType: string
 ): Promise<string> => {
   const ai = getAiClient();
-  
-  // Strip the "data:image/png;base64," prefix
   const base64Data = currentImageBase64.split(',')[1];
   
   let aspectRatio = "1:1";
@@ -264,17 +274,9 @@ export const refinePoster = async (
 
   const prompt = `
     ROLE: Senior Photo Retoucher.
-    TASK: Detailed Image Refinement & Fixing.
-    
-    INPUT IMAGE: The provided image is a nearly finished movie poster/ad creative.
+    TASK: Detailed Image Refinement.
     USER REQUEST: "${refinementPrompt}"
-
-    INSTRUCTIONS:
-    1. **PRESERVE INTEGRITY**: Do NOT regenerate the entire composition. Keep the lighting, color grading, background, and identity EXACTLY the same as the input image.
-    2. **TARGETED EDIT**: Apply changes ONLY to the area specified in the USER REQUEST (e.g., if asked to fix a hand, only touch the hand).
-    3. **QUALITY**: Ensure the fixed area blends seamlessly with the existing grain and resolution of the image.
-    4. **OUTPUT**: Return the polished image in 4K.
-    
+    INSTRUCTIONS: Fix the image according to the request. Keep original quality. Output 4K.
     Output Ratio: ${aspectRatio}.
   `;
 
@@ -283,22 +285,12 @@ export const refinePoster = async (
       model: 'gemini-3-pro-image-preview',
       contents: {
         parts: [
-          {
-            inlineData: {
-              mimeType: 'image/png',
-              data: base64Data
-            }
-          },
-          {
-            text: prompt
-          }
+          { inlineData: { mimeType: 'image/png', data: base64Data } },
+          { text: prompt }
         ]
       },
       config: {
-        imageConfig: {
-          aspectRatio: aspectRatio as any,
-          imageSize: '4K' as any
-        }
+        imageConfig: { aspectRatio: aspectRatio as any, imageSize: '4K' as any }
       }
     });
 
@@ -313,8 +305,7 @@ export const refinePoster = async (
         }
       }
     }
-    throw new Error("Refinement failed to produce an image.");
-
+    throw new Error("Refinement failed.");
   } catch (error: any) {
     console.error("Refinement Error:", error);
     throw new Error(error.message || "Failed to refine image.");
@@ -322,7 +313,7 @@ export const refinePoster = async (
 };
 
 /**
- * Chat bot functionality using gemini-3-pro-preview
+ * Chat bot functionality
  */
 export const sendChatMessage = async (
   history: { role: 'user' | 'model', text: string }[],
@@ -335,9 +326,7 @@ export const sendChatMessage = async (
       role: h.role,
       parts: [{ text: h.text }]
     })),
-    config: {
-        systemInstruction: "You are a helpful assistant for the CineMorph SaaS platform. You help users understand how to use the tool to create movie posters and ad creatives. Keep answers concise and helpful."
-    }
+    config: { systemInstruction: "You are a helper for CineMorph SaaS." }
   });
 
   const response = await chat.sendMessage({ message: newMessage });
