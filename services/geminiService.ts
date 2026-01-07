@@ -245,6 +245,83 @@ export const generateFinalPoster = async (
 };
 
 /**
+ * Refines an existing generated image based on a specific user instruction.
+ * This is akin to a "Photoshop Request".
+ */
+export const refinePoster = async (
+  currentImageBase64: string, // The image to fix (full data URL)
+  refinementPrompt: string,
+  outputType: string
+): Promise<string> => {
+  const ai = getAiClient();
+  
+  // Strip the "data:image/png;base64," prefix
+  const base64Data = currentImageBase64.split(',')[1];
+  
+  let aspectRatio = "1:1";
+  if (outputType === 'ad_stories' || outputType === 'landing_mobile') aspectRatio = "9:16";
+  else if (outputType === 'thumbnail' || outputType === 'landing_hero') aspectRatio = "16:9";
+
+  const prompt = `
+    ROLE: Senior Photo Retoucher.
+    TASK: Detailed Image Refinement & Fixing.
+    
+    INPUT IMAGE: The provided image is a nearly finished movie poster/ad creative.
+    USER REQUEST: "${refinementPrompt}"
+
+    INSTRUCTIONS:
+    1. **PRESERVE INTEGRITY**: Do NOT regenerate the entire composition. Keep the lighting, color grading, background, and identity EXACTLY the same as the input image.
+    2. **TARGETED EDIT**: Apply changes ONLY to the area specified in the USER REQUEST (e.g., if asked to fix a hand, only touch the hand).
+    3. **QUALITY**: Ensure the fixed area blends seamlessly with the existing grain and resolution of the image.
+    4. **OUTPUT**: Return the polished image in 4K.
+    
+    Output Ratio: ${aspectRatio}.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-image-preview',
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: base64Data
+            }
+          },
+          {
+            text: prompt
+          }
+        ]
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: aspectRatio as any,
+          imageSize: '4K' as any
+        }
+      }
+    });
+
+    const candidates = response.candidates;
+    if (candidates && candidates.length > 0) {
+      const parts = candidates[0].content?.parts;
+      if (parts) {
+        for (const part of parts) {
+            if (part.inlineData && part.inlineData.data) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
+        }
+      }
+    }
+    throw new Error("Refinement failed to produce an image.");
+
+  } catch (error: any) {
+    console.error("Refinement Error:", error);
+    throw new Error(error.message || "Failed to refine image.");
+  }
+};
+
+/**
  * Chat bot functionality using gemini-3-pro-preview
  */
 export const sendChatMessage = async (

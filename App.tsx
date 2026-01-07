@@ -18,10 +18,12 @@ import {
   ArrowDownFromLine,
   AlignLeft,
   AlignCenter,
-  AlignRight
+  AlignRight,
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { OutputType, LandingPosition, ProcessingStep } from './types';
-import { generateFinalPoster, analyzeImageStructure } from './services/geminiService';
+import { generateFinalPoster, analyzeImageStructure, refinePoster } from './services/geminiService';
 import PipelineVisualizer from './components/PipelineVisualizer';
 import MaskGallery from './components/MaskGallery';
 import ChatAssistant from './components/ChatAssistant';
@@ -58,6 +60,10 @@ const App: React.FC = () => {
     { id: '4', name: 'Identity Blocker', status: 'pending' },
     { id: '5', name: 'Final 4K Render', status: 'pending' },
   ]);
+
+  // State: Refinement
+  const [refinePrompt, setRefinePrompt] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
 
   // Check for API key on mount
   useEffect(() => {
@@ -206,6 +212,25 @@ const App: React.FC = () => {
       updateStep('5', 'error', displayMsg);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleRefine = async () => {
+    if (!generatedImage || !refinePrompt.trim() || isRefining) return;
+    
+    setIsRefining(true);
+    updateStep('5', 'processing', 'Applying Magic Fix...');
+
+    try {
+      const refinedImageUrl = await refinePoster(generatedImage, refinePrompt, outputType);
+      setGeneratedImage(refinedImageUrl);
+      setRefinePrompt(''); // Clear prompt
+      updateStep('5', 'completed', 'Refinement applied successfully');
+    } catch (error: any) {
+      console.error(error);
+      updateStep('5', 'error', 'Refinement failed. Try again.');
+    } finally {
+      setIsRefining(false);
     }
   };
 
@@ -514,9 +539,9 @@ const App: React.FC = () => {
         <div className="p-6 border-t border-zinc-800 bg-zinc-900/50">
           <button
             onClick={handleGenerate}
-            disabled={!actorFile || !refFile || isProcessing}
+            disabled={!actorFile || !refFile || isProcessing || isRefining}
             className={`w-full py-4 rounded-xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg ${
-              !actorFile || !refFile || isProcessing
+              !actorFile || !refFile || isProcessing || isRefining
                 ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                 : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25 hover:scale-[1.02]'
             }`}
@@ -529,7 +554,7 @@ const App: React.FC = () => {
             ) : (
               <>
                 <Layout className="w-4 h-4" />
-                GENERATE ASSET
+                {generatedImage ? 'RE-GENERATE' : 'GENERATE ASSET'}
               </>
             )}
           </button>
@@ -583,6 +608,20 @@ const App: React.FC = () => {
               ) : (
                 <>
                   <img src={generatedImage} alt="Generated Poster" className="w-full h-full object-cover" />
+                  
+                  {/* Overlay Loading State for Refinement */}
+                  {isRefining && (
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center z-20">
+                      <div className="bg-zinc-900 border border-zinc-700 px-6 py-4 rounded-xl flex items-center gap-3 shadow-2xl">
+                        <RefreshCw className="w-5 h-5 text-indigo-500 animate-spin" />
+                        <div>
+                           <p className="text-sm font-semibold text-white">Applying Magic Fix...</p>
+                           <p className="text-xs text-zinc-400">Polishing specific details</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                     <a 
                       href={generatedImage} 
@@ -596,6 +635,33 @@ const App: React.FC = () => {
                 </>
               )}
             </div>
+            
+            {/* Magic Fix / Refinement Bar - Appears only when image exists */}
+            {generatedImage && !isProcessing && (
+              <div className="absolute -bottom-2 w-[500px] max-w-full animate-in slide-in-from-bottom-4 duration-500 z-30">
+                <div className="bg-zinc-900/90 backdrop-blur-md border border-zinc-700 rounded-xl p-2 shadow-2xl flex gap-2 items-center">
+                   <div className="pl-3 pr-2">
+                      <Sparkles className="w-4 h-4 text-indigo-400" />
+                   </div>
+                   <input 
+                      type="text" 
+                      value={refinePrompt}
+                      onChange={(e) => setRefinePrompt(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleRefine()}
+                      placeholder="Magic Fix: Describe a specific detail to correct (e.g., 'Fix the index finger')..."
+                      className="flex-1 bg-transparent border-none text-sm text-white placeholder-zinc-500 focus:ring-0 outline-none"
+                      disabled={isRefining}
+                   />
+                   <button 
+                     onClick={handleRefine}
+                     disabled={!refinePrompt.trim() || isRefining}
+                     className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"
+                   >
+                     {isRefining ? 'FIXING...' : 'REFINE'}
+                   </button>
+                </div>
+              </div>
+            )}
             
             {/* Context Labels */}
             {outputType === OutputType.LANDING_HERO && !generatedImage && (
